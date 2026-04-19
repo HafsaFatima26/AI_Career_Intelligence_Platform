@@ -67,3 +67,12 @@ async def list_jobs(limit: int = 20):
     client = get_client()
     res = client.table("jobs").select("id, title, company, source_url").limit(limit).execute()
     return {"count": len(res.data), "jobs": res.data}
+
+
+
+@router.post("/run-agent")
+async def run_agent(background_tasks: BackgroundTasks):
+    """Triggers the Job Market Agent to extract + embed skills from scraped jobs."""
+    from agents.jobMarketAgent import run_job_market_agent
+    background_tasks.add_task(run_job_market_agent, 50)
+    return {"status": "agent started", "message": "Check terminal for progress logs"}

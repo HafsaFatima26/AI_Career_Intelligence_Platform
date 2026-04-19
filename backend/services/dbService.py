@@ -82,11 +82,33 @@ async def similarity_search(query_embedding: list, top_k: int = 20) -> list:
 
 async def get_skill_graph():
     client = get_client()
-    skills = client.table("extracted_skills").select("id, name, category, seniority, source").execute()
+    res = client.table("extracted_skills") \
+        .select("id, skill, category, seniority, frequency") \
+        .order("frequency", desc=True) \
+        .limit(100) \
+        .execute()
+
+    skills = res.data
     nodes = [
-        {"id": s["id"], "label": s["name"], "group": s["category"]}
-        for s in (skills.data or [])
+        {
+            "id": s["id"],
+            "label": s["skill"],
+            "category": s["category"],
+            "seniority": s["seniority"],
+            "frequency": s["frequency"],
+        }
+        for s in skills
     ]
-    # Simple co-occurrence edges: skills that share the same source job post
+
+    # Build edges between skills in the same category
     edges = []
+    for i, a in enumerate(skills):
+        for b in skills[i+1:]:
+            if a["category"] == b["category"]:
+                edges.append({
+                    "source": a["id"],
+                    "target": b["id"],
+                    "weight": 1
+                })
+
     return {"nodes": nodes, "edges": edges}
