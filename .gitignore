@@ -85,4 +85,8 @@ tmp/
 Desktop.ini
 $RECYCLE.BIN/
 
+# ─── Scraper output (runtime data) ──────────────────────────────────────────
+scraped_jobs.json
+*.json.bak
+
 /backend/agents/*

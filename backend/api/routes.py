@@ -1,9 +1,8 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from services.dbService import get_job_status, get_roadmap, get_skill_graph
 from orchestrator import run_workflow
-import uuid, os
+import uuid
 
 router = APIRouter()
 MAX_PDF_SIZE_BYTES = 2 * 1024 * 1024  # 2 MB
@@ -21,11 +20,9 @@ async def analyze_profile(
 ):
     if not resume.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF resumes accepted.")
-
     content = await resume.read()
     if len(content) > MAX_PDF_SIZE_BYTES:
         raise HTTPException(status_code=413, detail="PDF must be ≤ 2 MB.")
-
     job_id = str(uuid.uuid4())
     background_tasks.add_task(run_workflow, job_id, content, github_url)
     return {"job_id": job_id, "status": "queued"}
@@ -54,6 +51,19 @@ async def skill_graph():
 
 @router.post("/trigger-scrape")
 async def trigger_scrape(body: ScrapeRequest, background_tasks: BackgroundTasks):
-    from agents.jobMarketAgent import scrape_and_embed
-    background_tasks.add_task(scrape_and_embed, body.job_title)
-    return {"status": "scrape triggered", "job_title": body.job_title}
+    from services.scraperService import scrape_all_jobs, save_jobs_to_db, save_jobs_to_json
+    async def run_scrape():
+        jobs = await scrape_all_jobs()
+        save_jobs_to_json(jobs)           # local backup
+        await save_jobs_to_db(jobs)       # → Supabase
+    background_tasks.add_task(run_scrape)
+    return {"status": "scrape triggered", "message": "Check terminal for progress logs"}
+
+
+@router.get("/jobs")
+async def list_jobs(limit: int = 20):
+    """Returns recently scraped jobs from Supabase for verification."""
+    from services.dbService import get_client
+    client = get_client()
+    res = client.table("jobs").select("id, title, company, source_url").limit(limit).execute()
+    return {"count": len(res.data), "jobs": res.data}
