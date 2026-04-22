@@ -89,4 +89,4 @@ $RECYCLE.BIN/
 scraped_jobs.json
 *.json.bak
 
-/backend/agents/*
+/backend/agents/__pycache__
