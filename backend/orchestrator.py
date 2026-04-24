@@ -1,21 +1,25 @@
 """
-LangGraph Orchestrator — State machine connecting all agents.
+LangGraph Orchestrator — Sitting 4 update.
+
 State shape:
   {
-    job_id: str,
-    resume_bytes: bytes,
-    github_url: str | None,
-    resume_text: str,
-    user_skills: list,
+    job_id:        str,
+    resume_bytes:  bytes,
+    github_url:    str | None,
+    resume_text:   str,
+    user_skills:   list,
     market_skills: list,
-    gap_report: dict,
+    gap_report:    dict,
     final_roadmap: str,
   }
-Full graph wiring happens in Sitting 7.
+
+Sitting 4: run_workflow now calls the Profiling Agent (parse_resume + parse_github).
+Full LangGraph node graph wiring in Sitting 7.
 """
-from langgraph.graph import StateGraph, END
+
 from typing import TypedDict, Optional
 from services.dbService import upsert_job_status
+from utils.pdfParser import extract_text
 
 
 class WorkflowState(TypedDict):
@@ -30,8 +34,17 @@ class WorkflowState(TypedDict):
 
 
 async def run_workflow(job_id: str, resume_bytes: bytes, github_url: str | None):
-    """Background task entry point – called by /analyze-profile."""
-    await upsert_job_status(job_id, "profiling")
+    """
+    Background task entry point — called by POST /api/analyze-profile.
+
+    Sitting 4 implements:
+      - PDF text extraction from bytes
+      - Profiling Agent (resume + optional GitHub parsing)
+
+    Sitting 5 will add: Gap Analysis Agent
+    Sitting 6 will add: Strategist Agent
+    Sitting 7 will wire everything into a proper LangGraph StateGraph.
+    """
     state: WorkflowState = {
         "job_id": job_id,
         "resume_bytes": resume_bytes,
@@ -42,7 +55,38 @@ async def run_workflow(job_id: str, resume_bytes: bytes, github_url: str | None)
         "gap_report": {},
         "final_roadmap": "",
     }
-    # TODO (Sitting 7): wire LangGraph nodes.
-    # Placeholder: mark as pending.
-    await upsert_job_status(job_id, "pending_full_implementation")
-    print(f"[Orchestrator] job {job_id} scaffolded. Full graph in Sitting 7.")
+
+    try:
+        # ── Step 1: Extract text from PDF bytes ──────────────────────────────
+        await upsert_job_status(job_id, "extracting_text")
+        try:
+            resume_text = extract_text(resume_bytes)
+            state["resume_text"] = resume_text
+            print(f"[Orchestrator] job {job_id} — PDF extracted ({len(resume_text)} chars)")
+        except ValueError as exc:
+            await upsert_job_status(job_id, "error", {"error_message": str(exc)})
+            print(f"[Orchestrator] PDF extraction failed for {job_id}: {exc}")
+            return
+
+        # ── Step 2: Profiling Agent ───────────────────────────────────────────
+        from agents.profilingAgent import profile_user
+        state = await profile_user(state)
+        # profile_user sets status → "profiling" then → "gap_analysis" and
+        # persists user_skills to Supabase internally.
+
+        # ── Steps 3-5: Stubs (Sittings 5, 6, 7) ─────────────────────────────
+        # Gap Analysis Agent  → Sitting 5
+        # Strategist Agent    → Sitting 6
+        # Full LangGraph wiring → Sitting 7
+
+        await upsert_job_status(job_id, "pending_gap_analysis")
+        print(
+            f"[Orchestrator] job {job_id} — Profiling done. "
+            f"{len(state['user_skills'])} user skills stored. "
+            f"Awaiting Gap Analysis (Sitting 5)."
+        )
+
+    except Exception as exc:
+        await upsert_job_status(job_id, "error", {"error_message": str(exc)})
+        print(f"[Orchestrator] Unhandled error for job {job_id}: {exc}")
+        raise
